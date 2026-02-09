@@ -1,0 +1,10 @@
+## Interface: 11200
+## Title: SimpleFeralStatus
+## Notes: Energy/Rage bar and combo point indicators for Feral Druids
+## Author: YourNameHere
+## Version: 1.0
+## DefaultState: enabled
+## SavedVariables: 
+## OptionalDeps:
+
+SimpleFeralStatus.lua
