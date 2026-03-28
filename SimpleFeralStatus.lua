@@ -4,21 +4,43 @@
 -- ==================== Configuration Variables ====================
 local BAR_WIDTH = 120
 local BAR_HEIGHT = 6
-local MANA_BAR_OFFSET = 0  -- No gap between bars
+local MANA_BAR_OFFSET = 0
 
--- Calculate combo point dimensions
 local COMBO_POINTS_COUNT = 5
-local COMBO_WIDTH = BAR_WIDTH / COMBO_POINTS_COUNT  -- 24 pixels each
-local COMBO_HEIGHT = BAR_HEIGHT  -- Same height as bars
-local COMBO_SPACING = 0  -- No spacing between combo points
+local COMBO_WIDTH = BAR_WIDTH / COMBO_POINTS_COUNT
+local COMBO_HEIGHT = BAR_HEIGHT
 
--- ==================== Energy Tick Variables (from EnergyWatch) ====================
+-- ==================== State Variables ====================
+local BAR_SCALE        = 1.0
+local hideOutOfCombat  = false
+local stealthMode      = false   -- Show HUD in stealth; spark always visible in stealth
+local inCombat         = false
+local inStealth        = false
+
+-- ==================== Energy Tick Variables ====================
 local ENERGY_TICK_LENGTH = 2.0
-local ENERGY_PER_TICK = 20  -- Natural energy tick amount
-local energyTimerStart = 0
-local energyTimerEnd = 0
-local lastEnergy = nil
-local sparkVisible = false
+local ENERGY_PER_TICK    = 20
+local energyTimerStart   = 0
+local energyTimerEnd     = 0
+local lastEnergy         = nil
+local sparkVisible       = false
+
+-- ==================== SavedVariables ====================
+function SaveSettings()
+    SimpleFeralStatusDB = SimpleFeralStatusDB or {}
+    SimpleFeralStatusDB.scale            = BAR_SCALE
+    SimpleFeralStatusDB.hideOutOfCombat  = hideOutOfCombat
+    SimpleFeralStatusDB.stealthMode      = stealthMode
+end
+
+function LoadSettings()
+    if SimpleFeralStatusDB then
+        hideOutOfCombat = SimpleFeralStatusDB.hideOutOfCombat or false
+        stealthMode     = SimpleFeralStatusDB.stealthMode     or false
+        local savedScale = SimpleFeralStatusDB.scale or 1.0
+        ApplyScale(savedScale)
+    end
+end
 
 -- ==================== Main Energy/Rage Bar ====================
 local mainBar = CreateFrame("Frame", "FeralMainBar", UIParent)
@@ -27,73 +49,60 @@ mainBar:SetHeight(BAR_HEIGHT)
 mainBar:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 mainBar:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8X8",
-    edgeFile = "",  -- No border
-    tile = true, 
-    tileSize = 16, 
-    edgeSize = 0,
+    edgeFile = "", tile = true, tileSize = 16, edgeSize = 0,
     insets = { left = 0, right = 0, top = 0, bottom = 0 }
 })
-mainBar:SetBackdropColor(0.1, 0.1, 0.1, 0.8)  -- Dark gray background
+mainBar:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
 mainBar:SetMovable(true)
 mainBar:EnableMouse(true)
 mainBar:RegisterForDrag("LeftButton")
 mainBar:SetClampedToScreen(true)
 
--- Create actual energy/rage bar (overlay on background)
 local formBar = CreateFrame("StatusBar", "FeralFormBar", mainBar)
 formBar:SetWidth(BAR_WIDTH)
 formBar:SetHeight(BAR_HEIGHT)
 formBar:SetPoint("CENTER", mainBar, "CENTER", 0, 0)
 formBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-formBar:SetStatusBarColor(1, 0.82, 0, 0.9)  -- Default energy yellow
+formBar:SetStatusBarColor(1, 0.82, 0, 0.9)
 formBar:SetMinMaxValues(0, 100)
 formBar:SetValue(0)
 
--- ==================== Mana Bar (always shows caster mana) ====================
+-- ==================== Mana Bar ====================
 local manaBarFrame = CreateFrame("Frame", "FeralManaBarFrame", UIParent)
 manaBarFrame:SetWidth(BAR_WIDTH)
 manaBarFrame:SetHeight(BAR_HEIGHT)
 manaBarFrame:SetPoint("TOP", mainBar, "BOTTOM", 0, MANA_BAR_OFFSET)
 manaBarFrame:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8X8",
-    edgeFile = "",  -- No border
-    tile = true, 
-    tileSize = 16, 
-    edgeSize = 0,
+    edgeFile = "", tile = true, tileSize = 16, edgeSize = 0,
     insets = { left = 0, right = 0, top = 0, bottom = 0 }
 })
-manaBarFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.8)  -- Dark gray background
-
--- Mana bar is NOT movable - it always follows the main bar
+manaBarFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
 manaBarFrame:SetMovable(false)
 manaBarFrame:EnableMouse(false)
 manaBarFrame:SetClampedToScreen(true)
 
--- Create actual mana bar (overlay on background)
 local manaBar = CreateFrame("StatusBar", "FeralManaBar", manaBarFrame)
 manaBar:SetWidth(BAR_WIDTH)
 manaBar:SetHeight(BAR_HEIGHT)
 manaBar:SetPoint("CENTER", manaBarFrame, "CENTER", 0, 0)
 manaBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-manaBar:SetStatusBarColor(0.1, 0.5, 0.9, 0.9)  -- Mana blue
+manaBar:SetStatusBarColor(0.1, 0.5, 0.9, 0.9)
 manaBar:SetMinMaxValues(0, 100)
 manaBar:SetValue(0)
 
--- ==================== Energy Tick Spark (Simple white vertical line) ====================
+-- ==================== Energy Tick Spark ====================
 local sparkFrame = CreateFrame("Frame", "FeralSparkFrame", mainBar)
-sparkFrame:SetWidth(2)  -- Thin vertical line
+sparkFrame:SetWidth(2)
 sparkFrame:SetHeight(BAR_HEIGHT + 4)
 sparkFrame:SetPoint("CENTER", mainBar, "LEFT", 0, 0)
 
--- Create Spark as a simple white vertical line (no border, no star texture)
 local sparkTexture = sparkFrame:CreateTexture("FeralSparkTexture", "OVERLAY")
 sparkTexture:SetAllPoints(sparkFrame)
-sparkTexture:SetTexture("Interface\\Buttons\\WHITE8X8")  -- Simple white texture
-sparkTexture:SetVertexColor(1, 1, 1, 0.9)  -- Pure white, mostly opaque
+sparkTexture:SetTexture("Interface\\Buttons\\WHITE8X8")
+sparkTexture:SetVertexColor(1, 1, 1, 0.9)
 sparkFrame.texture = sparkTexture
-sparkFrame:Hide()  -- Hidden by default
-
--- Spark is NOT movable - it always follows the main bar
+sparkFrame:Hide()
 sparkFrame:SetMovable(false)
 sparkFrame:EnableMouse(false)
 sparkFrame:SetClampedToScreen(true)
@@ -102,346 +111,261 @@ sparkFrame:SetClampedToScreen(true)
 local comboFrames = {}
 local comboPoints = 0
 
--- Create 5 combo point frames (24 pixels each, total 120 pixels)
 for i = 1, COMBO_POINTS_COUNT do
-    local comboFrame = CreateFrame("Frame", "FeralComboFrame"..i, UIParent)
-    comboFrame:SetWidth(COMBO_WIDTH)
-    comboFrame:SetHeight(COMBO_HEIGHT)
-    
-    -- Calculate position: above main bar, perfectly aligned
-    -- Position each combo point adjacent to the previous one (no spacing)
-    local xOffset = ((i - 1) * COMBO_WIDTH) - (BAR_WIDTH / 2) + (COMBO_WIDTH / 2)
-    comboFrame:SetPoint("BOTTOM", mainBar, "TOP", xOffset, 0)
-    
-    comboFrame:SetBackdrop({
+    local cf = CreateFrame("Frame", "FeralComboFrame"..i, UIParent)
+    cf:SetWidth(COMBO_WIDTH)
+    cf:SetHeight(COMBO_HEIGHT)
+    local xOff = ((i-1) * COMBO_WIDTH) - (BAR_WIDTH/2) + (COMBO_WIDTH/2)
+    cf:SetPoint("BOTTOM", mainBar, "TOP", xOff, 0)
+    cf:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "",  -- No border
-        tile = true, 
-        tileSize = 16, 
-        edgeSize = 0,
+        edgeFile = "", tile = true, tileSize = 16, edgeSize = 0,
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
-    comboFrame:SetBackdropColor(0.3, 0.3, 0.3, 0.7)  -- Default gray, slightly transparent
-    
-    -- Combo points are NOT movable - they always follow the main bar
-    comboFrame:SetMovable(false)
-    comboFrame:EnableMouse(false)
-    comboFrame:SetClampedToScreen(true)
-    
-    -- Store reference
-    comboFrames[i] = comboFrame
+    cf:SetBackdropColor(0.3, 0.3, 0.3, 0.7)
+    cf:SetMovable(false)
+    cf:EnableMouse(false)
+    cf:SetClampedToScreen(true)
+    comboFrames[i] = cf
 end
 
--- ==================== Lock State Variable ====================
+-- ==================== Lock State ====================
 local framesLocked = true
 
--- Lock/unlock all frames
-function ToggleFramesLock(lock)
-    framesLocked = lock
-    
-    if lock then
-        mainBar:EnableMouse(false)
-        -- Mana bar, spark, and combo points are always not movable
-        manaBarFrame:EnableMouse(false)
-        sparkFrame:EnableMouse(false)
-        for i = 1, COMBO_POINTS_COUNT do
-            comboFrames[i]:EnableMouse(false)
-        end
-        print("SimpleFeralStatus frames locked")
+-- ==================== Scale / Resize ====================
+function ApplyScale(scale)
+    BAR_SCALE = scale
+
+    local sw  = BAR_WIDTH  * scale
+    local sh  = BAR_HEIGHT * scale
+    local scw = sw / COMBO_POINTS_COUNT
+
+    mainBar:SetWidth(sw)      ; mainBar:SetHeight(sh)
+    formBar:SetWidth(sw)      ; formBar:SetHeight(sh)
+    manaBarFrame:SetWidth(sw) ; manaBarFrame:SetHeight(sh)
+    manaBar:SetWidth(sw)      ; manaBar:SetHeight(sh)
+    sparkFrame:SetWidth(2)    ; sparkFrame:SetHeight(sh + 4)
+
+    for i = 1, COMBO_POINTS_COUNT do
+        comboFrames[i]:SetWidth(scw)
+        comboFrames[i]:SetHeight(sh)
+    end
+
+    UpdateAllPositions()
+end
+
+-- ==================== Visibility Logic ====================
+function ShouldShowHUD()
+    -- Stealth mode overrides hideOutOfCombat
+    if stealthMode and inStealth then return true end
+    if hideOutOfCombat and not inCombat then return false end
+    return true
+end
+
+function HideAllFrames()
+    mainBar:Hide()
+    manaBarFrame:Hide()
+    sparkFrame:Hide()
+    for i = 1, COMBO_POINTS_COUNT do comboFrames[i]:Hide() end
+end
+
+function UpdateVisibility()
+    local _, class = UnitClass("player")
+    if class ~= "DRUID" then HideAllFrames() ; return end
+    if ShouldShowHUD() then
+        UpdateAllIndicators()
     else
-        mainBar:EnableMouse(true)
-        -- Only main bar is movable, everything else follows it
-        manaBarFrame:EnableMouse(false)
-        sparkFrame:EnableMouse(false)
-        for i = 1, COMBO_POINTS_COUNT do
-            comboFrames[i]:EnableMouse(false)
-        end
-        print("SimpleFeralStatus unlocked - drag the energy/rage bar to move everything")
+        HideAllFrames()
     end
 end
 
--- ==================== Drag Scripts ====================
--- Main bar drag - moves entire UI
-mainBar:SetScript("OnDragStart", function()
-    if not framesLocked then
-        mainBar:StartMoving()
+-- ==================== Lock / Unlock ====================
+function ToggleFramesLock(lock)
+    framesLocked = lock
+    mainBar:EnableMouse(not lock)
+    if lock then
+        print("SimpleFeralStatus: frames locked")
+    else
+        print("SimpleFeralStatus: unlocked — drag the energy/rage bar to move")
     end
-end)
+end
 
+-- ==================== Drag ====================
+mainBar:SetScript("OnDragStart", function()
+    if not framesLocked then mainBar:StartMoving() end
+end)
 mainBar:SetScript("OnDragStop", function()
     if not framesLocked then
         mainBar:StopMovingOrSizing()
-        -- Update all other elements to follow main bar
         UpdateAllPositions()
     end
 end)
 
--- Mana bar, spark, and combo points have no drag scripts since they're not movable
-
--- ==================== Utility Functions ====================
--- Update all positions (everything follows main bar)
+-- ==================== Position Helpers ====================
 function UpdateAllPositions()
-    -- Update mana bar position (directly below with no gap)
     manaBarFrame:ClearAllPoints()
     manaBarFrame:SetPoint("TOP", mainBar, "BOTTOM", 0, MANA_BAR_OFFSET)
-    
-    -- Update spark position (relative to main bar)
     sparkFrame:ClearAllPoints()
     sparkFrame:SetPoint("CENTER", mainBar, "LEFT", 0, 0)
-    
-    -- Update combo point positions
     UpdateComboPositions()
 end
 
--- Update combo point positions (always follow main bar)
 function UpdateComboPositions()
+    local sw  = BAR_WIDTH * BAR_SCALE
+    local scw = sw / COMBO_POINTS_COUNT
     for i = 1, COMBO_POINTS_COUNT do
-        -- Calculate position for each combo point
-        local xOffset = ((i - 1) * COMBO_WIDTH) - (BAR_WIDTH / 2) + (COMBO_WIDTH / 2)
+        local xOff = ((i-1) * scw) - (sw/2) + (scw/2)
         comboFrames[i]:ClearAllPoints()
-        comboFrames[i]:SetPoint("BOTTOM", mainBar, "TOP", xOffset, 0)
+        comboFrames[i]:SetPoint("BOTTOM", mainBar, "TOP", xOff, 0)
     end
 end
 
--- ==================== Energy Tick Functions (Fixed EnergyWatch Logic) ====================
+-- ==================== Energy Tick ====================
 function UpdateEnergyTick()
     local form = GetCurrentForm()
-    
-    if form == "CAT" then
-        local formResource, casterMana = UnitMana("player")  -- Get both values
-        local currentTime = GetTime()
-        
-        -- Initialize lastEnergy if nil (first run)
-        if lastEnergy == nil then
-            lastEnergy = formResource
+    if form ~= "CAT" then
+        sparkFrame:Hide()
+        sparkVisible     = false
+        lastEnergy       = nil
+        energyTimerStart = 0
+        energyTimerEnd   = 0
+        return
+    end
+
+    local formResource = UnitMana("player")
+    local currentTime  = GetTime()
+
+    -- Initialise timer on first run
+    if lastEnergy == nil then
+        lastEnergy       = formResource
+        energyTimerStart = currentTime
+        energyTimerEnd   = currentTime + ENERGY_TICK_LENGTH
+    end
+
+    if currentTime >= energyTimerEnd then
+        -- Natural tick window elapsed — reset
+        energyTimerStart = currentTime
+        energyTimerEnd   = currentTime + ENERGY_TICK_LENGTH
+        sparkVisible     = true
+        lastEnergy       = formResource
+    elseif formResource > lastEnergy then
+        local gain = formResource - lastEnergy
+        if math.abs(gain - ENERGY_PER_TICK) <= 1 then
+            -- Confirmed natural tick — reset timer
             energyTimerStart = currentTime
-            energyTimerEnd = currentTime + ENERGY_TICK_LENGTH
+            energyTimerEnd   = currentTime + ENERGY_TICK_LENGTH
+            sparkVisible     = true
         end
-        
-        -- Check if timer has expired (natural tick should have occurred)
-        if currentTime >= energyTimerEnd then
-            -- Natural tick window expired, start new timer
-            energyTimerStart = currentTime
-            energyTimerEnd = currentTime + ENERGY_TICK_LENGTH
-            
-            -- Reset spark to beginning
-            local sparkPosition = 0
-            sparkFrame:SetPoint("CENTER", mainBar, "LEFT", sparkPosition, 0)
+        lastEnergy = formResource
+    elseif formResource < lastEnergy then
+        lastEnergy = formResource
+    end
+
+    -- In stealth mode: always show spark even at 100 energy so the player
+    -- can time their opener off the tick.
+    -- Outside stealth: hide at full energy (original behaviour).
+    local atFullEnergy = (formResource >= 100)
+    if atFullEnergy and not (stealthMode and inStealth) then
+        sparkFrame:Hide()
+        sparkVisible = false
+        return
+    end
+
+    if sparkVisible then
+        local timeSinceTick = currentTime - energyTimerStart
+        if (ENERGY_TICK_LENGTH - timeSinceTick) > 0 then
+            local progress = math.min(math.max(timeSinceTick / ENERGY_TICK_LENGTH, 0), 1)
+            local sw       = BAR_WIDTH * BAR_SCALE
+            sparkFrame:ClearAllPoints()
+            sparkFrame:SetPoint("CENTER", mainBar, "LEFT", progress * sw, 0)
             sparkFrame:Show()
-            sparkVisible = true
-            
-            lastEnergy = formResource
-        -- Check if we got a NATURAL energy tick (approx 20 energy)
-        elseif formResource > lastEnergy then
-            local energyGain = formResource - lastEnergy
-            
-            -- Check if this is a natural tick (approximately 20 energy)
-            -- Using tolerance of ±1 for rounding/display issues
-            if math.abs(energyGain - ENERGY_PER_TICK) <= 1 then
-                -- This is a natural tick! Reset timer
-                energyTimerStart = currentTime
-                energyTimerEnd = currentTime + ENERGY_TICK_LENGTH
-                
-                -- Reset spark to beginning
-                local sparkPosition = 0
-                sparkFrame:SetPoint("CENTER", mainBar, "LEFT", sparkPosition, 0)
-                sparkFrame:Show()
-                sparkVisible = true
-            end
-            -- If energy gain is NOT approx 20, it's from an ability - DON'T reset timer
-            
-            lastEnergy = formResource
-        elseif formResource < lastEnergy then
-            -- Energy decreased (used an ability)
-            lastEnergy = formResource
-        end
-        
-        -- Calculate and update spark position
-        if sparkVisible then
-            local timeSinceTick = currentTime - energyTimerStart
-            local timeUntilNextTick = ENERGY_TICK_LENGTH - timeSinceTick
-            
-            -- Only show spark if we're within the tick window
-            if timeUntilNextTick > 0 then
-                local progress = timeSinceTick / ENERGY_TICK_LENGTH
-                progress = math.min(math.max(progress, 0), 1)
-                
-                -- Calculate spark position (0 to BAR_WIDTH)
-                local sparkPosition = progress * BAR_WIDTH
-                
-                -- Position the spark
-                sparkFrame:SetPoint("CENTER", mainBar, "LEFT", sparkPosition, 0)
-                sparkFrame:Show()
-            else
-                -- Should have ticked by now, hide spark
-                sparkFrame:Hide()
-                sparkVisible = false
-            end
-        end
-        
-        -- Hide spark if at full energy
-        local maxFormResource = GetFormResourceMax()
-        if formResource >= maxFormResource then
+        else
             sparkFrame:Hide()
             sparkVisible = false
         end
     else
-        -- Not in cat form, hide spark and reset tracking
         sparkFrame:Hide()
-        sparkVisible = false
-        lastEnergy = nil
-        energyTimerStart = 0
-        energyTimerEnd = 0
     end
 end
 
--- Detect current form
+-- ==================== Form Detection ====================
 function GetCurrentForm()
     for i = 1, 3 do
-        local texture, name, isActive, isCastable = GetShapeshiftFormInfo(i)
+        local _, name, isActive = GetShapeshiftFormInfo(i)
         if isActive then
-            if i == 1 then
-                return "BEAR"
-            elseif i == 2 then
-                return "AQUATIC"
-            elseif i == 3 then
-                return "CAT"
-            end
+            if i == 1 then return "BEAR" end
+            if i == 2 then return "AQUATIC" end
+            if i == 3 then return "CAT" end
         end
     end
-    
     for i = 4, 5 do
-        local texture, name, isActive, isCastable = GetShapeshiftFormInfo(i)
+        local _, name, isActive = GetShapeshiftFormInfo(i)
         if isActive then
-            if string.find(name or "", "Travel") then
-                return "TRAVEL"
-            elseif string.find(name or "", "Moonkin") then
-                return "MOONKIN"
-            end
+            if string.find(name or "", "Travel")  then return "TRAVEL"  end
+            if string.find(name or "", "Moonkin") then return "MOONKIN" end
         end
     end
-    
     return "NONE"
 end
 
--- Get form resource max value
-function GetFormResourceMax()
-    local form = GetCurrentForm()
-    
-    if form == "CAT" then
-        return 100  -- Max energy
-    elseif form == "BEAR" then
-        return 100  -- Max rage
-    else
-        local casterMana = UnitMana("player")
-        -- In caster form, we need to check if this is form mana or caster mana
-        -- For now, use the second value from UnitManaMax
-        local formMax, casterMax = UnitManaMax("player")
-        return formMax or 100
-    end
-end
-
--- Get caster mana max value
-function GetCasterManaMax()
-    local formResource, casterMana = UnitMana("player")
-    local formMax, casterMax = UnitManaMax("player")
-    
-    -- Return the second value which should be caster mana max
-    return casterMax or 100
-end
-
--- Get current form resource (energy/rage) - for form bar display
 function GetFormResource()
     local form = GetCurrentForm()
-    local formResource, casterMana = UnitMana("player")  -- Get both values
-    
-    if form == "CAT" then
-        local maxEnergy = GetFormResourceMax()
-        return "ENERGY", formResource, maxEnergy
-    elseif form == "BEAR" then
-        local maxRage = GetFormResourceMax()
-        return "RAGE", formResource, maxRage
-    else
-        local maxMana = GetFormResourceMax()
-        return "MANA", formResource, maxMana
-    end
+    local formResource = UnitMana("player")
+    if form == "CAT"  then return "ENERGY", formResource, 100 end
+    if form == "BEAR" then return "RAGE",   formResource, 100 end
+    local formMax = UnitManaMax("player") or 100
+    return "MANA", formResource, formMax
 end
 
--- Get caster mana (always available in Turtle WoW)
 function GetCasterMana()
-    -- UnitMana("player") returns: (formResource, casterMana)
-    local formResource, casterMana = UnitMana("player")
-    local casterMax = GetCasterManaMax()
-    
+    local _, casterMana = UnitMana("player")
+    local _, casterMax  = UnitManaMax("player")
     return casterMana or 0, casterMax or 100
 end
 
--- Update form bar (energy/rage/caster mana)
+-- ==================== Bar Updates ====================
 function UpdateFormBar()
-    local form = GetCurrentForm()
     local resourceType, current, max = GetFormResource()
-    
     formBar:SetMinMaxValues(0, max)
     formBar:SetValue(current)
-    
     if resourceType == "ENERGY" then
-        formBar:SetStatusBarColor(1, 0.82, 0, 0.9)  -- Energy yellow
-        mainBar:Show()
+        formBar:SetStatusBarColor(1, 0.82, 0, 0.9)
     elseif resourceType == "RAGE" then
-        formBar:SetStatusBarColor(0.9, 0.1, 0.1, 0.9)  -- Rage red
-        mainBar:Show()
-    elseif resourceType == "MANA" then
-        formBar:SetStatusBarColor(0.1, 0.5, 0.9, 0.9)  -- Mana blue
-        mainBar:Show()
+        formBar:SetStatusBarColor(0.9, 0.1, 0.1, 0.9)
+    else
+        formBar:SetStatusBarColor(0.1, 0.5, 0.9, 0.9)
     end
+    mainBar:Show()
 end
 
--- Update mana bar (always shows caster mana, except in non-combat forms)
 function UpdateManaBar()
     local form = GetCurrentForm()
-    
-    -- Hide mana bar in non-combat forms (since top bar shows mana already)
-    -- Combat forms: CAT, BEAR
-    -- Non-combat forms: NONE, MOONKIN, TRAVEL, AQUATIC
     if form == "NONE" or form == "MOONKIN" or form == "TRAVEL" or form == "AQUATIC" then
-        manaBarFrame:Hide()
-        return
+        manaBarFrame:Hide() ; return
     end
-    
-    local casterMana, casterMax = GetCasterMana()
-    
-    manaBar:SetMinMaxValues(0, casterMax)
-    manaBar:SetValue(casterMana)
-    
-    -- Show mana bar when in combat forms (cat, bear)
+    local cur, max = GetCasterMana()
+    manaBar:SetMinMaxValues(0, max)
+    manaBar:SetValue(cur)
     manaBarFrame:Show()
 end
 
--- Update combo points (changed to red)
 function UpdateComboPoints()
     local form = GetCurrentForm()
-    
     if form == "CAT" then
         comboPoints = GetComboPoints()
-        
         for i = 1, COMBO_POINTS_COUNT do
             if i <= comboPoints then
-                -- Active combo point: bright red
-                comboFrames[i]:SetBackdropColor(0.9, 0.1, 0.1, 1.0)  -- Changed to red
+                comboFrames[i]:SetBackdropColor(0.9, 0.1, 0.1, 1.0)
             else
-                -- Inactive combo point: dark gray
                 comboFrames[i]:SetBackdropColor(0.3, 0.3, 0.3, 0.7)
             end
             comboFrames[i]:Show()
         end
     else
-        for i = 1, COMBO_POINTS_COUNT do
-            comboFrames[i]:Hide()
-        end
+        for i = 1, COMBO_POINTS_COUNT do comboFrames[i]:Hide() end
     end
 end
 
--- Update all indicators
 function UpdateAllIndicators()
     UpdateFormBar()
     UpdateManaBar()
@@ -449,190 +373,298 @@ function UpdateAllIndicators()
     UpdateEnergyTick()
 end
 
+-- ==================== Stealth Detection Helper ====================
+function CheckStealth()
+    -- Prowl uses "Ability_Ambush" icon on Turtle WoW / 1.12 clients
+    for i = 1, 40 do
+        local tex = GetPlayerBuffTexture(i)
+        if not tex then break end
+        if string.find(tex, "Ability_Ambush") then
+            return true
+        end
+    end
+    return false
+end
+
 -- ==================== Event Handling ====================
 local function OnEvent()
-    if event == "PLAYER_ENTERING_WORLD" or 
-       event == "PLAYER_LOGIN" or
-       event == "UNIT_ENERGY" or
-       event == "UNIT_RAGE" or
-       event == "UNIT_MANA" or
-       event == "UNIT_MAXENERGY" or
-       event == "UNIT_MAXRAGE" or
-       event == "UNIT_MAXMANA" or
-       event == "PLAYER_COMBO_POINTS" or
-       event == "PLAYER_AURAS_CHANGED" or 
-       event == "UPDATE_SHAPESHIFT_FORMS" or
-       event == "UPDATE_SHAPESHIFT_USABLE" or
+    if event == "VARIABLES_LOADED" then
+        LoadSettings()
+        return
+    end
+
+    if event == "PLAYER_REGEN_DISABLED" then
+        inCombat = true
+        UpdateVisibility()
+        return
+    end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        inCombat = false
+        UpdateVisibility()
+        return
+    end
+
+    if event == "PLAYER_AURAS_CHANGED" then
+        local wasStealthed = inStealth
+        inStealth = CheckStealth()
+        if wasStealthed ~= inStealth then
+            UpdateVisibility()
+            return   -- UpdateVisibility already calls UpdateAllIndicators if needed
+        end
+    end
+
+    if event == "PLAYER_ENTERING_WORLD" or
+       event == "PLAYER_LOGIN"          or
+       event == "UNIT_ENERGY"           or
+       event == "UNIT_RAGE"             or
+       event == "UNIT_MANA"             or
+       event == "UNIT_MAXENERGY"        or
+       event == "UNIT_MAXRAGE"          or
+       event == "UNIT_MAXMANA"          or
+       event == "PLAYER_COMBO_POINTS"   or
+       event == "PLAYER_AURAS_CHANGED"  or
+       event == "UPDATE_SHAPESHIFT_FORMS"    or
+       event == "UPDATE_SHAPESHIFT_USABLE"   or
        event == "UPDATE_SHAPESHIFT_COOLDOWN" or
        event == "SPELL_UPDATE_COOLDOWN" then
-        
+
         local _, class = UnitClass("player")
         if class == "DRUID" then
-            UpdateAllIndicators()
-        else
-            mainBar:Hide()
-            manaBarFrame:Hide()
-            sparkFrame:Hide()
-            for i = 1, COMBO_POINTS_COUNT do
-                comboFrames[i]:Hide()
+            if ShouldShowHUD() then
+                UpdateAllIndicators()
+            else
+                HideAllFrames()
             end
+        else
+            HideAllFrames()
         end
     end
 end
 
--- Register events
+-- ==================== Event Registration ====================
+-- Register all events on mainBar only — one event handler is enough
 local events = {
-    "PLAYER_ENTERING_WORLD",
-    "PLAYER_LOGIN", 
-    "UNIT_ENERGY",
-    "UNIT_RAGE",
-    "UNIT_MANA",
-    "UNIT_MAXENERGY",
-    "UNIT_MAXRAGE",
-    "UNIT_MAXMANA",
-    "PLAYER_COMBO_POINTS",
-    "PLAYER_AURAS_CHANGED",
-    "UPDATE_SHAPESHIFT_FORMS",
-    "UPDATE_SHAPESHIFT_USABLE",
-    "UPDATE_SHAPESHIFT_COOLDOWN",
-    "SPELL_UPDATE_COOLDOWN"
+    "PLAYER_ENTERING_WORLD", "PLAYER_LOGIN",
+    "UNIT_ENERGY", "UNIT_RAGE", "UNIT_MANA",
+    "UNIT_MAXENERGY", "UNIT_MAXRAGE", "UNIT_MAXMANA",
+    "PLAYER_COMBO_POINTS", "PLAYER_AURAS_CHANGED",
+    "UPDATE_SHAPESHIFT_FORMS", "UPDATE_SHAPESHIFT_USABLE",
+    "UPDATE_SHAPESHIFT_COOLDOWN", "SPELL_UPDATE_COOLDOWN",
+    "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+    "VARIABLES_LOADED",
 }
-
-for _, event in pairs(events) do
-    mainBar:RegisterEvent(event)
-    manaBarFrame:RegisterEvent(event)
-    sparkFrame:RegisterEvent(event)
-    for i = 1, COMBO_POINTS_COUNT do
-        comboFrames[i]:RegisterEvent(event)
-    end
+for _, ev in pairs(events) do
+    mainBar:RegisterEvent(ev)
 end
-
 mainBar:SetScript("OnEvent", OnEvent)
-manaBarFrame:SetScript("OnEvent", OnEvent)
-sparkFrame:SetScript("OnEvent", OnEvent)
-for i = 1, COMBO_POINTS_COUNT do
-    comboFrames[i]:SetScript("OnEvent", OnEvent)
-end
 
 -- ==================== Update Loop ====================
 local updateCounter = 0
-local function OnUpdate()
+mainBar:SetScript("OnUpdate", function()
     updateCounter = updateCounter + arg1
-    if updateCounter > 0.05 then  -- Update every 0.05 seconds for smooth spark movement
+    if updateCounter > 0.05 then
         updateCounter = 0
         local _, class = UnitClass("player")
-        if class == "DRUID" then
+        if class == "DRUID" and ShouldShowHUD() then
             UpdateAllIndicators()
         end
     end
+end)
+
+-- ==================== Settings GUI ====================
+local settingsFrame = CreateFrame("Frame", "SFSSettingsFrame", UIParent)
+settingsFrame:SetWidth(230)
+settingsFrame:SetHeight(210)
+settingsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+settingsFrame:SetBackdrop({
+    bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 32,
+    insets = { left = 8, right = 8, top = 8, bottom = 8 }
+})
+settingsFrame:SetMovable(true)
+settingsFrame:EnableMouse(true)
+settingsFrame:RegisterForDrag("LeftButton")
+settingsFrame:SetScript("OnDragStart", function() settingsFrame:StartMoving() end)
+settingsFrame:SetScript("OnDragStop",  function() settingsFrame:StopMovingOrSizing() end)
+settingsFrame:Hide()
+
+-- Title
+local guiTitle = settingsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+guiTitle:SetPoint("TOP", settingsFrame, "TOP", 0, -16)
+guiTitle:SetText("SimpleFeralStatus")
+
+-- Close button
+local closeBtn = CreateFrame("Button", nil, settingsFrame, "UIPanelCloseButton")
+closeBtn:SetPoint("TOPRIGHT", settingsFrame, "TOPRIGHT", -4, -4)
+closeBtn:SetScript("OnClick", function() settingsFrame:Hide() end)
+
+-- Checkbox helper
+local function MakeCheckbox(parent, label, yOff, getVal, setVal)
+    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, yOff)
+    cb:SetWidth(24) ; cb:SetHeight(24)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+    lbl:SetText(label)
+    cb:SetChecked(getVal())
+    cb:SetScript("OnClick", function()
+        setVal(cb:GetChecked() == 1)
+        SaveSettings()
+        UpdateVisibility()
+    end)
+    cb.Sync = function() cb:SetChecked(getVal()) end
+    return cb
 end
 
-mainBar:SetScript("OnUpdate", OnUpdate)
-manaBarFrame:SetScript("OnUpdate", OnUpdate)
-sparkFrame:SetScript("OnUpdate", OnUpdate)
-for i = 1, COMBO_POINTS_COUNT do
-    comboFrames[i]:SetScript("OnUpdate", OnUpdate)
-end
+local cbCombat = MakeCheckbox(settingsFrame, "Hide when out of combat", -48,
+    function() return hideOutOfCombat end,
+    function(v) hideOutOfCombat = v   end)
+
+local cbStealth = MakeCheckbox(settingsFrame, "Show in stealth (spark at 100 energy)", -76,
+    function() return stealthMode end,
+    function(v) stealthMode = v   end)
+
+-- Scale label + slider
+local scaleLbl = settingsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+scaleLbl:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 16, -108)
+scaleLbl:SetText("Scale: 1.0x")
+
+local slider = CreateFrame("Slider", "SFSScaleSlider", settingsFrame, "OptionsSliderTemplate")
+slider:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 20, -128)
+slider:SetWidth(190)
+slider:SetMinMaxValues(0.5, 3.0)
+slider:SetValueStep(0.1)
+slider:SetValue(BAR_SCALE)
+getglobal(slider:GetName().."Low"):SetText("0.5")
+getglobal(slider:GetName().."High"):SetText("3.0")
+getglobal(slider:GetName().."Text"):SetText("")
+slider:SetScript("OnValueChanged", function()
+    local v = math.floor(slider:GetValue() * 10 + 0.5) / 10
+    scaleLbl:SetText(string.format("Scale: %.1fx", v))
+    ApplyScale(v)
+    SaveSettings()
+end)
+
+-- Reset position button
+local resetBtn = CreateFrame("Button", nil, settingsFrame, "UIPanelButtonTemplate")
+resetBtn:SetPoint("BOTTOM", settingsFrame, "BOTTOM", 0, 14)
+resetBtn:SetWidth(150) ; resetBtn:SetHeight(22)
+resetBtn:SetText("Reset Position")
+resetBtn:SetScript("OnClick", function()
+    mainBar:ClearAllPoints()
+    mainBar:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    UpdateAllPositions()
+end)
+
+-- Sync all controls when the GUI opens
+settingsFrame:SetScript("OnShow", function()
+    cbCombat.Sync()
+    cbStealth.Sync()
+    slider:SetValue(BAR_SCALE)
+    scaleLbl:SetText(string.format("Scale: %.1fx", BAR_SCALE))
+end)
 
 -- ==================== Slash Commands ====================
 SLASH_SIMPLEFERAL1 = "/sfs"
 SLASH_SIMPLEFERAL2 = "/simpleferal"
 
 SlashCmdList["SIMPLEFERAL"] = function(msg)
-    if msg == "reset" then
-        -- Reset main bar position
+    msg = string.lower(msg or "")
+
+    if msg == "" or msg == "config" or msg == "gui" then
+        if settingsFrame:IsVisible() then
+            settingsFrame:Hide()
+        else
+            settingsFrame:Show()
+        end
+
+    elseif msg == "reset" then
         mainBar:ClearAllPoints()
         mainBar:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        
-        -- Update all other elements to follow main bar
         UpdateAllPositions()
-        
-        print("SimpleFeralStatus positions reset")
-        print("Note: All elements move together as one unit")
+        print("SimpleFeralStatus: position reset")
+
     elseif msg == "lock" then
         ToggleFramesLock(true)
+
     elseif msg == "unlock" then
         ToggleFramesLock(false)
+
     elseif msg == "spark" then
-        -- Toggle spark display
         if sparkFrame:IsVisible() then
             sparkFrame:Hide()
-            print("Energy spark hidden")
+            print("SimpleFeralStatus: spark hidden")
         else
             sparkFrame:Show()
-            print("Energy spark shown")
+            print("SimpleFeralStatus: spark shown")
         end
+
+    elseif msg == "combat" then
+        hideOutOfCombat = not hideOutOfCombat
+        print("SimpleFeralStatus: hide out of combat = " .. tostring(hideOutOfCombat))
+        SaveSettings()
+        UpdateVisibility()
+
+    elseif msg == "stealth" then
+        stealthMode = not stealthMode
+        print("SimpleFeralStatus: stealth mode = " .. tostring(stealthMode))
+        SaveSettings()
+        UpdateVisibility()
+
+    elseif string.sub(msg, 1, 5) == "scale" then
+        local v = tonumber(string.sub(msg, 7))
+        if v and v >= 0.1 and v <= 5.0 then
+            ApplyScale(v)
+            SaveSettings()
+        else
+            print("Usage: /sfs scale <0.1-5.0>  e.g. /sfs scale 1.5")
+            print("Current scale: " .. BAR_SCALE .. "x")
+        end
+
     elseif msg == "debug" then
         local _, class = UnitClass("player")
-        print("Debug - Class:", class)
-        
         local form = GetCurrentForm()
-        print("Current Form:", form)
-        
-        for i = 1, 5 do
-            local texture, name, isActive, isCastable = GetShapeshiftFormInfo(i)
-            if name then
-                print("Form Slot", i, "- Name:", name, "- Active:", isActive)
-            end
-        end
-        
-        -- Test UnitMana returns
         local formResource, casterMana = UnitMana("player")
         local formMax, casterMax = UnitManaMax("player")
-        print("UnitMana returns:", formResource, casterMana)
-        print("UnitManaMax returns:", formMax, casterMax)
-        
-        print("Form Resource:", formResource)
-        print("Caster Mana:", casterMana)
-        
-        local comboPoints = GetComboPoints()
-        print("Combo Points:", comboPoints)
-        
+        print("=== SimpleFeralStatus Debug ===")
+        print("Class:", class, "| Form:", form)
+        print("UnitMana:", formResource, casterMana)
+        print("UnitManaMax:", formMax, casterMax)
+        print("Combo Points:", GetComboPoints())
+        print("Scale:", BAR_SCALE .. "x")
+        print("Hide OOC:", tostring(hideOutOfCombat), "| In Combat:", tostring(inCombat))
+        print("Stealth Mode:", tostring(stealthMode), "| In Stealth:", tostring(inStealth))
         if form == "CAT" then
-            local currentTime = GetTime()
-            print("Energy tick info:")
-            print("  Timer start:", string.format("%.2f", energyTimerStart))
-            print("  Timer end:", string.format("%.2f", energyTimerEnd))
-            print("  Current time:", string.format("%.2f", currentTime))
-            print("  Time to next tick:", string.format("%.2f", math.max(0, energyTimerEnd - currentTime)))
-            print("  Last energy:", lastEnergy)
-            print("  Current energy:", formResource)
-            if lastEnergy then
-                print("  Energy difference:", formResource - lastEnergy)
-            end
+            local t = GetTime()
+            print("Tick timer:", string.format("%.2f / %.2f", energyTimerStart, energyTimerEnd))
+            print("Time to next tick:", string.format("%.2fs", math.max(0, energyTimerEnd - t)))
+            print("Last energy:", lastEnergy, "| Current:", formResource)
         end
-        
-        UpdateAllIndicators()
+
     else
-        print("SimpleFeralStatus commands:")
-        print("/sfs reset - Reset all frame positions")
-        print("/sfs lock - Lock frames in place")
-        print("/sfs unlock - Unlock frames for moving")
-        print("/sfs spark - Toggle energy spark visibility")
-        print("/sfs debug - Show debug information")
-        print("")
-        print("Top row: 5 Combo Points (Cat form only, 24px each, total 120px) - RED")
-        print("Middle row: Energy (Cat) / Rage (Bear) / Mana (Non-combat forms) - 120px wide")
-        print("Bottom row: Caster Mana (shown in combat forms only: Cat, Bear) - 120px wide")
-        print("Spark: White vertical line showing next energy tick (Cat form only)")
-        print("")
-        print("All rows are 6px tall and 120px wide")
-        print("All elements move together as one unit - drag the energy/rage bar to reposition")
+        print("SimpleFeralStatus  /sfs <command>")
+        print("  (no args)  — Open/close settings GUI")
+        print("  reset      — Reset position to center screen")
+        print("  lock       — Lock HUD position")
+        print("  unlock     — Unlock HUD for dragging")
+        print("  spark      — Toggle energy tick spark")
+        print("  combat     — Toggle hide when out of combat")
+        print("  stealth    — Toggle stealth mode")
+        print("  scale <n>  — Resize HUD  e.g. /sfs scale 2.0")
+        print("  debug      — Print debug info")
+        print("Scale: " .. BAR_SCALE .. "x  |  hide OOC: " .. tostring(hideOutOfCombat) .. "  |  stealth mode: " .. tostring(stealthMode))
     end
 end
 
--- ==================== Initial Check ====================
+-- ==================== Initial Setup ====================
 local _, class = UnitClass("player")
 if class == "DRUID" then
     mainBar:Show()
     manaBarFrame:Show()
     UpdateAllIndicators()
-    UpdateAllPositions()  -- Ensure all elements are properly positioned
+    UpdateAllPositions()
 else
-    mainBar:Hide()
-    manaBarFrame:Hide()
-    sparkFrame:Hide()
-    for i = 1, COMBO_POINTS_COUNT do
-        comboFrames[i]:Hide()
-    end
+    HideAllFrames()
 end
