@@ -248,6 +248,7 @@ function UpdateEnergyTick()
         energyTimerEnd   = currentTime + ENERGY_TICK_LENGTH
         sparkVisible     = true
         lastEnergy       = formResource
+        sparkFrame:SetPoint("CENTER", mainBar, "LEFT", 0, 0)
     elseif formResource > lastEnergy then
         local gain = formResource - lastEnergy
         if math.abs(gain - ENERGY_PER_TICK) <= 1 then
@@ -255,6 +256,7 @@ function UpdateEnergyTick()
             energyTimerStart = currentTime
             energyTimerEnd   = currentTime + ENERGY_TICK_LENGTH
             sparkVisible     = true
+            sparkFrame:SetPoint("CENTER", mainBar, "LEFT", 0, 0)
         end
         lastEnergy = formResource
     elseif formResource < lastEnergy then
@@ -276,7 +278,8 @@ function UpdateEnergyTick()
         if (ENERGY_TICK_LENGTH - timeSinceTick) > 0 then
             local progress = math.min(math.max(timeSinceTick / ENERGY_TICK_LENGTH, 0), 1)
             local sw       = BAR_WIDTH * BAR_SCALE
-            sparkFrame:ClearAllPoints()
+            -- SetPoint without ClearAllPoints for smooth movement —
+            -- clearing anchors every frame causes a recalculation stutter
             sparkFrame:SetPoint("CENTER", mainBar, "LEFT", progress * sw, 0)
             sparkFrame:Show()
         else
