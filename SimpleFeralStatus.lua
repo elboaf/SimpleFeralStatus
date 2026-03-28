@@ -270,25 +270,8 @@ function UpdateEnergyTick()
     if atFullEnergy and not (stealthMode and inStealth) then
         sparkFrame:Hide()
         sparkVisible = false
-        return
     end
-
-    if sparkVisible then
-        local timeSinceTick = currentTime - energyTimerStart
-        if (ENERGY_TICK_LENGTH - timeSinceTick) > 0 then
-            local progress = math.min(math.max(timeSinceTick / ENERGY_TICK_LENGTH, 0), 1)
-            local sw       = BAR_WIDTH * BAR_SCALE
-            -- SetPoint without ClearAllPoints for smooth movement —
-            -- clearing anchors every frame causes a recalculation stutter
-            sparkFrame:SetPoint("CENTER", mainBar, "LEFT", progress * sw, 0)
-            sparkFrame:Show()
-        else
-            sparkFrame:Hide()
-            sparkVisible = false
-        end
-    else
-        sparkFrame:Hide()
-    end
+    -- Actual spark movement is handled each frame in OnUpdate for smooth animation
 end
 
 -- ==================== Form Detection ====================
@@ -463,16 +446,33 @@ end
 mainBar:SetScript("OnEvent", OnEvent)
 
 -- ==================== Update Loop ====================
-local updateCounter = 0
+-- Only the spark needs per-frame updates for smooth animation.
+-- All bar/combo/mana values are updated by events instead.
 mainBar:SetScript("OnUpdate", function()
-    updateCounter = updateCounter + arg1
-    if updateCounter > 0.05 then
-        updateCounter = 0
-        local _, class = UnitClass("player")
-        if class == "DRUID" and ShouldShowHUD() then
-            UpdateAllIndicators()
-        end
+    local _, class = UnitClass("player")
+    if class ~= "DRUID" then return end
+    if not ShouldShowHUD() then return end
+    if GetCurrentForm() ~= "CAT" then return end
+
+    if not sparkVisible then
+        sparkFrame:Hide()
+        return
     end
+
+    local currentTime   = GetTime()
+    local timeSinceTick = currentTime - energyTimerStart
+    local progress      = timeSinceTick / ENERGY_TICK_LENGTH
+
+    if progress >= 1 then
+        sparkFrame:Hide()
+        sparkVisible = false
+        return
+    end
+
+    progress = math.min(math.max(progress, 0), 1)
+    local sw = BAR_WIDTH * BAR_SCALE
+    sparkFrame:SetPoint("CENTER", mainBar, "LEFT", progress * sw, 0)
+    sparkFrame:Show()
 end)
 
 -- ==================== Settings GUI ====================
